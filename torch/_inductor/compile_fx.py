@@ -20,7 +20,8 @@ from operator import attrgetter
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
-
+import torch._logging.structured
+from torch.utils._traceback import CapturedTraceback
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
 import torch.utils._pytree as pytree
@@ -738,13 +739,16 @@ def _compile_fx_inner(
     # Clean up Compiled Triton Kernels per inductor compile, as the future objects
     # may not be valid for use after they are run/autotuned
     torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
-
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         # trigger the real recompilation for _LazyGraphModule before returning
         # the forward method.
         from torch.fx._lazy_graph_module import _LazyGraphModule
 
         _LazyGraphModule.force_recompile(gm)
+        compile_id = torch._guards.CompileContext.current_compile_id(),
+        with dynamo_timed("backward no-op", log_pt2_compile_event=True):
+            CompileEventLogger.pt2_compile("backward no-op", compile_id=compile_id)
+
         return make_boxed_func(gm.forward)
 
     static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())
